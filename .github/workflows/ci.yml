@@ -1,0 +1,95 @@
+# .github/workflows/ci.yml
+# CI for pg_rolequota
+# Enforces AGENTS.md rules:
+#   - 2-space indentation (this file uses 2 spaces)
+#   - Every change must keep `make test` green
+#   - Full matrix across PostgreSQL 14, 15, 16, 17, 18 on every push/PR
+
+name: ci
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        pg_version: ["14", "15", "16", "17", "18"]
+    container: postgres:${{ matrix.pg_version }}-bookworm
+
+    defaults:
+      run:
+        working-directory: ${{ github.workspace }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cache apt archives
+        uses: actions/cache@v4
+        with:
+          path: /var/cache/apt/archives
+          key: apt-${{ matrix.pg_version }}-${{ hashFiles('.github/workflows/ci.yml') }}
+          restore-keys: |
+            apt-${{ matrix.pg_version }}-
+
+      - name: Install build dependencies
+        run: |
+          apt-get update -qq
+          apt-get install -y --no-install-recommends \
+            build-essential \
+            postgresql-server-dev-${{ matrix.pg_version }} \
+            libcurl4-openssl-dev \
+            git \
+            ca-certificates \
+            libkrb5-dev \
+            clang-format \
+            clang-tidy
+
+      - name: Build
+        run: make
+        env:
+          PG_CONFIG: /usr/lib/postgresql/${{ matrix.pg_version }}/bin/pg_config
+
+      - name: Run the sacred test gate (AGENTS.md)
+        run: |
+          make verify-whitespace
+          make test
+        env:
+          PG_CONFIG: /usr/lib/postgresql/${{ matrix.pg_version }}/bin/pg_config
+
+      - name: Upload test artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs-pg${{ matrix.pg_version }}
+          path: |
+            results/
+            regression.diffs
+            tmp/
+
+  # Optional: full docker matrix job (only runs on schedule or manual trigger)
+  # Kept as a cross-check against the in-container build path above.
+  docker-matrix:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    strategy:
+      fail-fast: false
+      matrix:
+        pg_version: ["14", "15", "16", "17", "18"]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run docker-test target
+        run: make docker-test-pg-${{ matrix.pg_version }}

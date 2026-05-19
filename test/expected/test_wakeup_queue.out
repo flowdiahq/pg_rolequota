@@ -1,0 +1,57 @@
+-- test_wakeup_queue.sql
+-- Stress + overflow coverage for the lock-free wake-up ring + the BGW's
+-- consume_overflow() reconciliation path. AGENTS.md §3 ownership: this
+-- exercises src/shmem.c's enqueue/dequeue/consume_overflow and the BGW's
+-- Phase-2 fallback in src/pg_rolequota.c.
+--
+-- Architectural note: the BGW scans pg_class in the 'postgres' database;
+-- the regression suite runs in 'contrib_regression'. We therefore can't
+-- directly observe a fresh test role's storage. The test asserts that the
+-- burst-of-wakeups path (a) does not error out, and (b) advances
+-- last_checked for a role that owns catalog tables (bootstrap superuser,
+-- oid 10) — proving the BGW drained the queue and ran the scan path
+-- (either targeted or the overflow-triggered full scan).
+\echo '--- test_wakeup_queue starting ---'
+--- test_wakeup_queue starting ---
+CREATE EXTENSION IF NOT EXISTS pg_rolequota;
+NOTICE:  extension "pg_rolequota" already exists, skipping
+\echo '--- bursting >256 request_wakeup(oid) calls ---'
+--- bursting >256 request_wakeup(oid) calls ---
+DO $do$
+DECLARE
+  r oid := 10;
+  before_ts timestamptz;
+  after_ts timestamptz;
+  attempts int := 0;
+  found bool := false;
+  i int;
+BEGIN
+  SELECT max(last_checked) INTO before_ts
+    FROM rolequota.status() WHERE roleid = r;
+
+  /* Tight loop: 300 enqueues — guaranteed to overflow the 256-slot ring
+   * if the BGW is slow to drain. Either way the test must complete
+   * without error and the role must be re-scanned. */
+  FOR i IN 1..300 LOOP
+    PERFORM rolequota.request_wakeup(r);
+  END LOOP;
+
+  /* Poll for up to ~2 s. Reconciliation full scan after overflow takes
+   * slightly more time than a targeted scan. */
+  WHILE attempts < 25 AND NOT found LOOP
+    PERFORM pg_sleep(0.2);
+    SELECT max(last_checked) INTO after_ts
+      FROM rolequota.status() WHERE roleid = r;
+    found := after_ts IS NOT NULL
+             AND (before_ts IS NULL OR after_ts > before_ts);
+    attempts := attempts + 1;
+  END LOOP;
+
+  IF NOT found THEN
+    RAISE EXCEPTION 'burst wake-up did not advance last_checked for role % '
+                    '(before=%, after=%, attempts=%)',
+                    r, before_ts, after_ts, attempts;
+  END IF;
+END $do$;
+\echo '--- test_wakeup_queue finished (burst + overflow reconciliation exercised) ---'
+--- test_wakeup_queue finished (burst + overflow reconciliation exercised) ---

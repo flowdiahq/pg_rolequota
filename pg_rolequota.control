@@ -1,0 +1,9 @@
+# pg_rolequota.control
+# Control file for the pg_rolequota extension
+# 2-space indentation per AGENTS.md
+
+comment = 'Per-role disk-storage quotas across all databases in a cluster — soft/hard limits, session termination, account locking, sub-10 ms wake-up bus, dual scanning modes (shared_hosting + enterprise_db)'
+default_version = '1.0'
+module_pathname = '$libdir/pg_rolequota'
+relocatable = false
+requires = ''

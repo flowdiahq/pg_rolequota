@@ -1,0 +1,126 @@
+-- test_mid_query_cancel.sql
+-- Exercises the BGW-side mid-query cancellation path:
+--   common_post_scan → pg_rolequota_cancel_overage_backends → SPI
+--   pg_cancel_backend(pid) over pg_stat_activity matched on (datid, usesysid).
+--
+-- pg_regress runs in a single psql session, so we cannot create a long-running
+-- active backend in another session to actually observe a SIGINT landing.
+-- What we CAN do deterministically:
+--   1. Drive the post-scan path with a hard-exceeded role.
+--   2. Confirm scan_shared() runs without error when cancel_enabled is on.
+--   3. Toggle cancel_enabled = off, repeat — also runs without error.
+--   4. Toggle cancel_grace_bytes to absurd value, confirm no-op semantics.
+-- The "real" mid-query cancellation is verified in the README's live demo
+-- (examples/quick-demo.sql) and the architecture doc, which require a
+-- multi-session test harness outside pg_regress' scope.
+-- 2-space per AGENTS.md.
+\echo '--- test_mid_query_cancel starting ---'
+--- test_mid_query_cancel starting ---
+CREATE EXTENSION IF NOT EXISTS pg_rolequota;
+NOTICE:  extension "pg_rolequota" already exists, skipping
+-- Confirm the two new GUCs are registered and have their documented defaults.
+SELECT name, setting
+FROM pg_settings
+WHERE name IN ('pg_rolequota.cancel_enabled',
+               'pg_rolequota.cancel_grace_bytes')
+ORDER BY name;
+              name               | setting 
+---------------------------------+---------
+ pg_rolequota.cancel_enabled     | on
+ pg_rolequota.cancel_grace_bytes | 0
+(2 rows)
+
+-- Set up a hard-exceeded role so the cancel branch will actually fire.
+DO $do$
+DECLARE
+  rolename text := 'rolequota_cancel_test_role';
+  r oid;
+BEGIN
+  -- idempotent role + table setup
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = rolename) THEN
+    EXECUTE format('CREATE ROLE %I LOGIN', rolename);
+  END IF;
+  EXECUTE format('GRANT CREATE ON SCHEMA public TO %I', rolename);
+  r := (SELECT oid FROM pg_roles WHERE rolname = rolename);
+
+  -- Throwaway data table owned by the test role.
+  EXECUTE 'DROP TABLE IF EXISTS public.rolequota_cancel_data';
+  EXECUTE format('CREATE TABLE public.rolequota_cancel_data (pad text)');
+  EXECUTE format('ALTER TABLE public.rolequota_cancel_data OWNER TO %I',
+                 rolename);
+  INSERT INTO public.rolequota_cancel_data
+  SELECT repeat('x', 200) FROM generate_series(1, 200);
+
+  -- Hard limit of 1 KB. Used_bytes will be ≫ 1 KB, so cancel branch fires.
+  DELETE FROM rolequota.limits WHERE roleid = r;
+  INSERT INTO rolequota.limits (roleid, soft_bytes, hard_bytes, enforcement_policy)
+  VALUES (r, 512, 1024, 'warn'); -- 'warn' avoids the lock/terminate branches
+                                  -- so we observe ONLY the cancellation path.
+END $do$;
+NOTICE:  table "rolequota_cancel_data" does not exist, skipping
+-- 1. cancel_enabled = true (the default). scan_shared() drives the worker
+--    path through common_post_scan, which observes hard_exceeded and calls
+--    pg_rolequota_cancel_overage_backends. No active backend exists for the
+--    test role in pg_regress, so the SPI returns 0 cancellations — but the
+--    full code path is exercised.
+\echo '--- cancel_enabled = true: scan_shared runs cleanly ---'
+--- cancel_enabled = true: scan_shared runs cleanly ---
+SET pg_rolequota.cancel_enabled = on;
+SELECT rolequota.scan_shared() IS NULL AS scan_ok_with_cancel_on;
+ scan_ok_with_cancel_on 
+------------------------
+ f
+(1 row)
+
+-- 2. The role's status() row should now report hard_exceeded = true with
+--    enforcement_policy = warn (no terminate/lock side-effects), proving
+--    the post-scan ran AND the cancel branch didn't crash the scan.
+SELECT roleid::regrole::text AS role,
+       hard_exceeded,
+       soft_exceeded,
+       enforcement_policy
+FROM rolequota.status()
+WHERE roleid = (SELECT oid FROM pg_roles
+                WHERE rolname = 'rolequota_cancel_test_role');
+            role            | hard_exceeded | soft_exceeded | enforcement_policy 
+----------------------------+---------------+---------------+--------------------
+ rolequota_cancel_test_role | t             | t             | warn
+(1 row)
+
+-- 3. cancel_enabled = false. scan_shared() must still run, but the cancel
+--    branch is now bypassed. Verifying via the absence of any error /
+--    crash; behaviour is identical from SQL's POV in pg_regress.
+\echo '--- cancel_enabled = false: scan_shared still runs cleanly ---'
+--- cancel_enabled = false: scan_shared still runs cleanly ---
+SET pg_rolequota.cancel_enabled = off;
+SELECT rolequota.scan_shared() IS NULL AS scan_ok_with_cancel_off;
+ scan_ok_with_cancel_off 
+-------------------------
+ f
+(1 row)
+
+-- 4. cancel_grace_bytes absurdly high — used_bytes is over hard but under
+--    hard+grace, so the cancel branch is short-circuited even with
+--    cancel_enabled=true.
+\echo '--- cancel_grace_bytes raises the threshold ---'
+--- cancel_grace_bytes raises the threshold ---
+SET pg_rolequota.cancel_enabled = on;
+SET pg_rolequota.cancel_grace_bytes = 1000000000;
+SELECT rolequota.scan_shared() IS NULL AS scan_ok_with_huge_grace;
+ scan_ok_with_huge_grace 
+-------------------------
+ f
+(1 row)
+
+-- Restore defaults for downstream tests.
+SET pg_rolequota.cancel_enabled = on;
+SET pg_rolequota.cancel_grace_bytes = 0;
+-- Cleanup.
+DROP TABLE IF EXISTS public.rolequota_cancel_data;
+DELETE FROM rolequota.limits
+WHERE roleid = (SELECT oid FROM pg_roles
+                WHERE rolname = 'rolequota_cancel_test_role');
+REVOKE ALL ON SCHEMA public FROM rolequota_cancel_test_role;
+DROP ROLE IF EXISTS rolequota_cancel_test_role;
+\echo '--- test_mid_query_cancel finished ---'
+--- test_mid_query_cancel finished ---

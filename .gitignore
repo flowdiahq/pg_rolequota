@@ -1,0 +1,39 @@
+# pg_rolequota .gitignore
+# Standard ignores for PostgreSQL extensions built with PGXS
+
+# Compiled objects and libraries
+*.o
+*.so
+*.a
+*.lo
+*.la
+*.bc
+
+# Build / regression artifacts
+results/
+tmp/
+regression.diffs
+regression.out
+*.gcda
+*.gcno
+*.gcov
+
+# Editor / IDE noise
+*~
+.*.swp
+.*.swo
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.sublime-*
+
+# Packaging / distribution
+*.tar.gz
+*.zip
+*.tgz
+
+# Local test / docker overrides (never commit)
+test/local-*.conf
+docker-compose.override.yml
+*.dylib

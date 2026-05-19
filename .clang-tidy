@@ -1,0 +1,23 @@
+---
+# .clang-tidy for pg_rolequota
+# Focus on real bugs, memory safety, locking discipline, error handling, and performance.
+# This complements the hazard contracts in architecture.md.
+
+Checks: >
+  bugprone-*,
+  clang-analyzer-*,
+  misc-*,
+  performance-*,
+  readability-*,
+  -readability-braces-around-statements,
+  -bugprone-narrowing-conversions,
+  -clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling,
+  -clang-analyzer-cplusplus.NewDeleteLeaks
+
+WarningsAsErrors: ''
+HeaderFilterRegex: '.*'
+FormatStyle: file
+
+# You can enable more checks over time, e.g.:
+#   -bugprone-reserved-identifier,
+#   -performance-inefficient-string-concatenation

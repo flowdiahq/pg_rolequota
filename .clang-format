@@ -1,0 +1,41 @@
+---
+# .clang-format for pg_rolequota
+# Tuned for 2-space indentation and reasonable C style for a PostgreSQL extension.
+# Run with: make format   (or clang-format -i -style=file ...)
+
+Language: Cpp
+BasedOnStyle: LLVM
+IndentWidth: 2
+UseTab: Never
+
+# Brace style - Attach is clean and common in PG extensions
+BreakBeforeBraces: Attach
+
+# Line length - PostgreSQL historically likes ~80-100
+ColumnLimit: 80
+
+# Pointer alignment (int *foo vs int* foo)
+PointerAlignment: Right
+
+# Spacing
+SpaceAfterCStyleCast: false
+SpaceBeforeAssignmentOperators: true
+SpaceBeforeParens: ControlStatements
+SpacesInParentheses: false
+
+# Alignment
+AlignAfterOpenBracket: Align
+AlignOperands: Align
+
+# Short forms - be strict to keep code readable
+AllowShortBlocksOnASingleLine: Never
+AllowShortCaseLabelsOnASingleLine: false
+AllowShortFunctionsOnASingleLine: None
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+
+# Misc
+IndentCaseLabels: false
+IndentGotoLabels: false
+KeepEmptyLinesAtTheStartOfBlocks: false
+SortIncludes: false

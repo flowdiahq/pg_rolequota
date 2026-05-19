@@ -1,0 +1,14 @@
+-- test_slack.sql (Phase 7)
+\echo '--- test_slack starting ---'
+--- test_slack starting ---
+CREATE EXTENSION IF NOT EXISTS pg_rolequota;
+NOTICE:  extension "pg_rolequota" already exists, skipping
+-- Linkage proof for slack.c (function declared by the extension).
+SELECT rolequota.slack_test() AS slack_ok;
+ slack_ok 
+----------
+ t
+(1 row)
+
+\echo '--- test_slack finished (C symbol always linked; HAVE_CURL affects only slack_send() compile-time path) ---'
+--- test_slack finished (C symbol always linked; HAVE_CURL affects only slack_send() compile-time path) ---

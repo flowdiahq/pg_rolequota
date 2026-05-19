@@ -1,0 +1,53 @@
+-- test_skeleton.sql
+-- Trivial test that must pass even in the earliest skeleton phase.
+-- This proves the extension can be loaded (via shared_preload_libraries),
+-- CREATE EXTENSION succeeds, and basic SQL objects from pg_rolequota--1.0.sql exist.
+-- Follows AGENTS.md: every file has a test. Updated in Phase 1.
+\echo '--- pg_rolequota skeleton test starting ---'
+--- pg_rolequota skeleton test starting ---
+-- Real CREATE EXTENSION now works (Phase 1 completion)
+CREATE EXTENSION IF NOT EXISTS pg_rolequota;
+NOTICE:  extension "pg_rolequota" already exists, skipping
+-- Verify core objects from the SQL script
+\echo '--- checking schema and table ---'
+--- checking schema and table ---
+SELECT nspname FROM pg_namespace WHERE nspname = 'rolequota';
+  nspname  
+-----------
+ rolequota
+(1 row)
+
+\echo '--- checking limits table ---'
+--- checking limits table ---
+SELECT tablename FROM pg_tables WHERE schemaname = 'rolequota' AND tablename = 'limits';
+ tablename 
+-----------
+ limits
+(1 row)
+
+\echo '--- checking status SRF (real shmem-backed) ---'
+--- checking status SRF (real shmem-backed) ---
+SELECT proname FROM pg_proc WHERE pronamespace = (SELECT oid FROM pg_namespace WHERE nspname='rolequota') AND proname = 'status';
+ proname 
+---------
+ status
+(1 row)
+
+\echo '--- checking version() helper ---'
+--- checking version() helper ---
+SELECT rolequota.version() LIKE '%pg_rolequota%' AS version_ok;
+ version_ok 
+------------
+ t
+(1 row)
+
+\echo '--- querying status SRF (real implementation) ---'
+--- querying status SRF (real implementation) ---
+SELECT count(*) >= 0 AS status_srf_ok FROM rolequota.status();
+ status_srf_ok 
+---------------
+ t
+(1 row)
+
+\echo '--- skeleton test finished successfully ---'
+--- skeleton test finished successfully ---
